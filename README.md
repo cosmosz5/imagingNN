@@ -4,6 +4,8 @@ This is a repository with code to perform interferometric image reconstruction u
 
 To download the .npz cube with the simulated black hole images visit: https://drive.google.com/drive/folders/1pTl6s18CUovAfo4ZU1eArF1bhI1kx0-p?usp=share_link 
 
+**** The .npz files are necessary to run the trainning process of the GAN *****
+
 The current code in the repository ONLY runs on Apple computers with M processors. To run the GAN trainning, download the repository and type the following command in the Terminal: 
 
 ```
