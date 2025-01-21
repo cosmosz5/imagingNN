@@ -17,7 +17,7 @@ from resnet_utils import Bottleneck, ResNet
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=4000, help="number of epochs of training")
+parser.add_argument("--n_epochs", type=int, default=500, help="number of epochs of training")
 parser.add_argument("--batch_size", type=int, default=256, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
@@ -31,8 +31,10 @@ opt = parser.parse_args()
 print(opt)
 
 # set device
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(device)
+#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#print(device)
+device = torch.device('mps')
+
 
 def load_pretrained_weights(model, weights_path):
     model.load_state_dict(torch.load(weights_path), strict=False)
@@ -124,10 +126,10 @@ adversarial_loss = torch.nn.BCELoss()
 generator = Generator()
 discriminator = Discriminator()
 
-if device.type == 'cuda':
-    generator.cuda()
-    discriminator.cuda()
-    adversarial_loss.cuda()
+if device.type == 'mps':
+    generator.to('mps')
+    discriminator.to('mps')
+    adversarial_loss.to('mps')
 
 #pretrained_weightsG_path = 'model_GAN-generator64i_2650.pth'
 #pretrained_weightsD_path = 'model_GAN-discriminator64i_2650.pth'
@@ -143,7 +145,9 @@ discriminator.apply(weights_init_normal)
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=2e-4, betas=(opt.b1, opt.b2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=4e-4, betas=(opt.b1, opt.b2))
 
-Tensor = torch.cuda.FloatTensor if device.type == 'cuda' else torch.FloatTensor
+#Tensor = torch.cuda.FloatTensor if device.type == 'cuda' else torch.FloatTensor
+
+Tensor = torch.FloatTensor
 
 
 def train(optimizer_G, optimizer_D, train_loader,epoch):
@@ -157,16 +161,16 @@ def train(optimizer_G, optimizer_D, train_loader,epoch):
     for batch_idx, data in enumerate(train_loader):
 
         # Adversarial ground truths
-        valid = Variable(Tensor(data[0].size(0), 1).fill_(1.0), requires_grad=False)
-        fake = Variable(Tensor(data[0].size(0), 1).fill_(0.0), requires_grad=False)
+        valid = Variable(Tensor(data[0].size(0), 1).fill_(1.0), requires_grad=False).to('mps')
+        fake = Variable(Tensor(data[0].size(0), 1).fill_(0.0), requires_grad=False).to('mps')
 
         # Configure input
-        real_imgs = Variable(data[0].type(Tensor))
+        real_imgs = Variable(Tensor(data[0])).to('mps')
 
         generator.zero_grad() ##Start the optimizer for the Generator
 
         # Sample noise as generator input
-        z = Variable(Tensor(np.random.normal(0, 1, (data[0].shape[0], opt.latent_dim))))
+        z = Variable(torch.FloatTensor(np.random.normal(0, 1, (data[0].shape[0], opt.latent_dim)))).to('mps')
 
         # Generate a batch of images
         gen_imgs = generator(z)
@@ -177,13 +181,14 @@ def train(optimizer_G, optimizer_D, train_loader,epoch):
         #DIscriminator trainning 
         discriminator.zero_grad() # Start the optimizer for the DIscriminator 
         output_discriminator = discriminator(all_samples)
+
         d_loss = adversarial_loss(output_discriminator, all_samples_labels)
         d_loss.backward()
         optimizer_D.step()
 
         #Data for Generator trainning 
         # Sample noise as generator input
-        z = Variable(Tensor(np.random.normal(0, 1, (data[0].shape[0], opt.latent_dim))))
+        z = Variable(Tensor(np.random.normal(0, 1, (data[0].shape[0], opt.latent_dim)))).to('mps')
         generator.zero_grad()
         gen_ims = generator(z)
         output_discriminator_generated = discriminator(gen_ims)
@@ -210,12 +215,12 @@ def train(optimizer_G, optimizer_D, train_loader,epoch):
                 % (epoch, opt.n_epochs, batch_idx, len(train_loader), d_loss.item(), g_loss.item()))
 
     if (epoch % 50 == 0):
-        torch.save(generator.state_dict(), f'model_GAN-generator64i_1e5_{epoch}.pth')
-        torch.save(discriminator.state_dict(), f'model_GAN-discriminator64i_1e5_{epoch}.pth')
+        torch.save(generator.state_dict(), f'model_GAN-generator64i_all_{epoch}.pth')
+        torch.save(discriminator.state_dict(), f'model_GAN-discriminator64i_all_{epoch}.pth')
         with torch.no_grad():
             z = Variable(Tensor(np.random.normal(0, 1, (1, opt.latent_dim))))
             aa = generator(z)
-            pyfits.writeto('rec64_GAN_1e5_'+str(epoch)+'.fits', np.squeeze(aa.cpu().detach().numpy()), overwrite=True)
+            pyfits.writeto('rec64_GAN_all_'+str(epoch)+'.fits', np.squeeze(aa.cpu().detach().numpy()), overwrite=True)
         print(f'Checkpoint saved at epoch {epoch}')
 
     if epoch == 1:
@@ -246,7 +251,7 @@ def main():
     load_data = np.load('ims_bhole_4uas_all_threshold.npz')
     train_images = load_data['data']
     X_train = train_images.reshape(1, 64,64, 120000)
-    X_train = X_train[:, :, :, 100000::]
+    #X_train = X_train[:, :, :, 100000::]
     X_train = np.swapaxes(X_train, 3, 2)
     X_train = np.swapaxes(X_train, 2, 1)
     X_train = np.swapaxes(X_train, 1, 0)
@@ -270,7 +275,7 @@ def main():
 
     for epoch in range(1, epochs + 1):
         g_loss_save, d_loss_save = train(optimizer_G, optimizer_D, train_loader, epoch)
-        np.savez('train_losses64_GAN_100000.npz', g_loss=g_loss_save, d_loss=d_loss_save)
+        np.savez('train_losses64_GAN_all.npz', g_loss=g_loss_save, d_loss=d_loss_save)
 
 if __name__ == "__main__":
     main()
